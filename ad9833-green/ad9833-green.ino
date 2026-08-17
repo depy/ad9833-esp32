@@ -1,4 +1,6 @@
 #include <SPI.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
 /* ===== From MCP41010 data sheet =====
 Command byte:
@@ -163,10 +165,15 @@ private:
 #define FSYNC 5                       // Standard SPI pins for the AD9833 waveform generator.
 #define CLK 18                         // CLK and DATA pins are shared with the TFT display.
 #define DATA 23
-#define CSDPOT 22
+#define CSDPOT 17
 
 MCP41010* dp;
 AD9833* ad9833;
+LiquidCrystal_I2C lcd(0x3F,16,2);
+
+byte sineChar[] = {B00000, B00000, B01000, B10101, B10101, B00010, B00000, B00000};
+byte triangleChar[] = {B00000, B00000, B00100, B01010, B10001, B00000, B00000, B00000};
+byte squareChar[] = {B00000, B00000, B11101, B10101, B10111, B00000, B00000, B00000};
 
 void setup() {
   Serial.begin(115200);
@@ -180,38 +187,48 @@ void setup() {
   ad9833->reset();
   delay(10);
 
-  ad9833->prepare();
-  ad9833->setFreq(0, 400);
-  ad9833->setWaveForm(AD9833::SIN);
-
-  ad9833->prepare();
-  ad9833->setFreq(1, 800);
-  ad9833->setWaveForm(AD9833::SIN);
+  Wire.begin(21, 22);
+  lcd.init();
+  lcd.backlight();
+  lcd.createChar(0, sineChar);
+  lcd.createChar(1, triangleChar);
+  lcd.createChar(2, squareChar);
+  lcd.setCursor(0, 0);
 }
 
 void loop() {
+  dp->setAmplitude(64);
+  ad9833->signal(100, AD9833::SIN);
+  lcd.setCursor(0, 0);
+  lcd.write(0);
+  lcd.print(" 1kHz | A: 64 0");
   delay(2000);
-  ad9833->writeControlReg(0);
 
+  dp->setAmplitude(128);
+  ad9833->signal(1000, AD9833::SIN);
+  lcd.setCursor(0, 0);
+  lcd.write(0);
+  lcd.print(" 1kHz | A: 128");
   delay(2000);
-  ad9833->writeControlReg((1 << 11));
 
-  // delay(1000);
-  // dp->setAmplitude(255);
-  // ad9833->signal(1000, 0, AD9833::SIN);
+  dp->setAmplitude(255);
+  ad9833->signal(1000, AD9833::SIN);
+  lcd.setCursor(0, 0);
+  lcd.write(0);
+  lcd.print(" 1kHz | A: 255");
+  delay(2000);
 
-  // delay(1000);
-  // ad9833->signal(1000, 90, AD9833::SIN);
+  dp->setAmplitude(255);
+  ad9833->signal(1000, AD9833::TRI);
+  lcd.setCursor(0, 0);
+  lcd.write(1);
+  lcd.print(" 1kHz | A: 255");
+  delay(2000);
 
-  // delay(1000);
-  // dp->setAmplitude(255);
-  // ad9833->signal(1000000, 0, AD9833::SIN);
-
-  // delay(1000);
-  // dp->setAmplitude(255);
-  // ad9833->signal(1000000, 0, AD9833::TRI);
-
-  // delay(1000);
-  // dp->setAmplitude(32);
-  // ad9833->signal(1000000, 0, AD9833::SQR);
+  dp->setAmplitude(255);
+  ad9833->signal(1000, AD9833::SQR);
+  lcd.setCursor(0, 0);
+  lcd.write(2);
+  lcd.print(" 1kHz | A: 255");
+  delay(2000);
 }
