@@ -1,6 +1,8 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
+#include "Button2.h"
+#include "Rotary.h"
 
 /* ===== From MCP41010 data sheet =====
 Command byte:
@@ -162,18 +164,53 @@ private:
   }
 };
 
-#define FSYNC 5                       // Standard SPI pins for the AD9833 waveform generator.
-#define CLK 18                         // CLK and DATA pins are shared with the TFT display.
-#define DATA 23
+// Ad9833
+#define FSYNC   5
+#define CLK    18
+#define DATA   23
 #define CSDPOT 17
+
+#define ROTARY1_PIN1 25
+#define ROTARY1_PIN2 26
+#define BUTTON1_PIN	 27
+
+#define ROTARY2_PIN1 32
+#define ROTARY2_PIN2 35
+#define BUTTON2_PIN	 34
 
 MCP41010* dp;
 AD9833* ad9833;
 LiquidCrystal_I2C lcd(0x3F,16,2);
 
+Rotary r;
+Rotary r2;
+Button2 b;
+Button2 b2;
+
 byte sineChar[] = {B00000, B00000, B01000, B10101, B10101, B00010, B00000, B00000};
 byte triangleChar[] = {B00000, B00000, B00100, B01010, B10001, B00000, B00000, B00000};
 byte squareChar[] = {B00000, B00000, B11101, B10101, B10111, B00000, B00000, B00000};
+
+int freq = 1000;
+int currFreq = 1000;
+int amplitude = 60;
+int currAmplitude = 60;
+
+int stepIndex = 2;
+int steps[6] = {1,10,100,1000,10000,100000};
+
+AD9833::Waveform mode = AD9833::SIN;
+AD9833::Waveform currMode = AD9833::SIN;
+
+int modeIndex = 0;
+AD9833::Waveform modes[] = {
+  AD9833::SIN,
+  AD9833::TRI,
+  AD9833::SQR,
+};
+
+bool update = false;
+int ms = millis();
 
 void setup() {
   Serial.begin(115200);
@@ -194,41 +231,169 @@ void setup() {
   lcd.createChar(1, triangleChar);
   lcd.createChar(2, squareChar);
   lcd.setCursor(0, 0);
+
+  r.begin(ROTARY1_PIN1, ROTARY1_PIN2, 4);
+  r.setLeftRotationHandler(adjustFreq);
+  r.setRightRotationHandler(adjustFreq);
+
+  b.begin(BUTTON1_PIN);
+  b.setClickHandler(nextStepSize);
+  //b.setLongClickHandler(...);
+
+  r2.begin(ROTARY2_PIN1, ROTARY2_PIN2, 4);
+  r2.setLeftRotationHandler(adjustAmplitude);
+  r2.setRightRotationHandler(adjustAmplitude);
+
+  b2.begin(BUTTON2_PIN);
+  b2.setClickHandler(nextMode);
+  //b2.setLongClickHandler(...);
+
+  ad9833->signal(currFreq, currMode);
+
+  update = true;
 }
 
 void loop() {
-  dp->setAmplitude(64);
-  ad9833->signal(100, AD9833::SIN);
-  lcd.setCursor(0, 0);
-  lcd.write(0);
-  lcd.print(" 1kHz | A: 64 0");
-  delay(2000);
+  r.loop();
+  b.loop();
+  r2.loop();
+  b2.loop();
 
-  dp->setAmplitude(128);
-  ad9833->signal(1000, AD9833::SIN);
-  lcd.setCursor(0, 0);
-  lcd.write(0);
-  lcd.print(" 1kHz | A: 128");
-  delay(2000);
+  if((millis() - ms ) > 20 && update == true) {
+    ms = millis();
+    updateLCD();
 
-  dp->setAmplitude(255);
-  ad9833->signal(1000, AD9833::SIN);
-  lcd.setCursor(0, 0);
-  lcd.write(0);
-  lcd.print(" 1kHz | A: 255");
-  delay(2000);
+    if(freq != currFreq || mode != currMode) {
+      ad9833->signal(freq, mode);
+      currFreq = freq;
+      currMode = mode;
+    }
 
-  dp->setAmplitude(255);
-  ad9833->signal(1000, AD9833::TRI);
-  lcd.setCursor(0, 0);
-  lcd.write(1);
-  lcd.print(" 1kHz | A: 255");
-  delay(2000);
+    if(amplitude != currAmplitude) {
+      dp->setAmplitude(amplitude);
+      currAmplitude = amplitude;
+    }
+  }
+}
 
-  dp->setAmplitude(255);
-  ad9833->signal(1000, AD9833::SQR);
+// On left or right rotation
+void adjustFreq(Rotary& r) {
+  int s = steps[stepIndex];
+  if (r.directionToString(r.getDirection()) == "LEFT") {
+    if(freq+s <= 1000000) {
+      freq += s;
+    }
+  } else if (r.directionToString(r.getDirection()) == "RIGHT") {
+    if(freq-s >= 1) {
+      freq -= s;
+    }
+  }
+  update = true;
+}
+
+// On left or right rotation
+void adjustAmplitude(Rotary& r) {
+  if (r.directionToString(r.getDirection()) == "LEFT") {
+    if(amplitude + 5 <= 255) {
+      amplitude += 5;
+    }
+  } else if (r.directionToString(r.getDirection()) == "RIGHT") {
+    if(amplitude - 5 >= 5) {
+      amplitude -= 5;
+    }
+  }
+  update = true;
+}
+
+// Single click
+void nextStepSize(Button2& btn) {
+  if (stepIndex == 5) {
+    stepIndex = 0;
+  } else {
+    stepIndex += 1;
+  }
+  update = true;
+}
+
+// Long click
+void nextMode(Button2& btn) {
+  if(modeIndex == 2) {
+    modeIndex = 0;
+  } else {
+    modeIndex += 1;
+  }
+  mode = modes[modeIndex];
+  //r.resetPosition();
+  update = true;
+}
+
+void updateLCD() {
+  lcd.clear();
+  printMode();
+  printStep();
+  printFreq();
+  printAmpl();
+  update = false;
+}
+
+// Print signal mode
+void printMode() {
   lcd.setCursor(0, 0);
-  lcd.write(2);
-  lcd.print(" 1kHz | A: 255");
-  delay(2000);
+  switch(modes[modeIndex]) {
+    case AD9833::SIN: lcd.print("Sin "); lcd.write(0); break;
+    case AD9833::TRI: lcd.write(1); break;
+    case AD9833::SQR: lcd.write(2); break;
+  }
+}
+
+// Print step size
+void printStep() {
+  lcd.setCursor(0, 1);
+  lcd.print("Stp ");
+
+  lcd.setCursor(4, 1);
+  switch(steps[stepIndex]) {
+    case 1: lcd.print("1"); break;
+    case 10: lcd.print("10"); break;
+    case 100: lcd.print("100"); break;
+    case 1000: lcd.print("1k"); break;
+    case 10000: lcd.print("10k"); break;
+    case 100000: lcd.print("100k"); break;
+  }
+}
+
+// Print frequency
+void printFreq() {
+  lcd.setCursor(6, 0);
+  lcd.print(freq);
+  lcd.setCursor(6 + numDigits(freq), 0);
+  lcd.print("Hz");
+}
+
+// Linest in excel gave:
+// m = 0.01421628336
+// b = 0.01446312606
+void printAmpl() {
+  lcd.setCursor(9, 1);
+  lcd.print("A ");
+  double m = 0.01421628336;
+  double b = 0.01446312606;
+  float adjAmpl = (amplitude * m + b) * 1000;
+  if(adjAmpl < 1000) {
+    lcd.print(adjAmpl, 0);
+    lcd.print("mV  ");
+  } else {
+    lcd.print(adjAmpl/1000, 2);
+    lcd.print("V ");
+  }
+  lcd.print(amplitude);
+}
+
+int numDigits(int num) {
+  int digits = 0;
+  while(num) {
+    num /= 10;
+    digits++;
+  }
+  return digits;
 }
